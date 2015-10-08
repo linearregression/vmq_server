@@ -1138,7 +1138,7 @@ msg_ref() ->
     GUID =
     case get(guid) of
         undefined ->
-            {{node(), now()}, 0};
+            {{node(), os:timestamp()}, 0};
         {S, I} ->
             {S, I + 1}
     end,
