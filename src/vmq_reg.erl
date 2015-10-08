@@ -17,15 +17,15 @@
 
 %% API
 -export([
-         %% used in vmq_session fsm handling
+         %% used in mqtt fsm handling
          subscribe/4,
          unsubscribe/4,
          register_subscriber/2,
          delete_subscriptions/1,
-         %% used in vmq_session fsm handling
+         %% used in mqtt fsm handling
          publish/1,
 
-         %% used in vmq_session:get_info/2
+         %% used in :get_info/2
          get_session_pids/1,
          get_queue_pid/1,
 
@@ -47,7 +47,7 @@
 %% used by reg views
 -export([subscribe_subscriber_changes/0,
          fold_subscribers/2]).
-%% used by vmq_session:list_sessions
+%% used by vmq_mqtt_fsm list_sessions
 -export([fold_sessions/2]).
 
 %% exported because currently used by netsplit tests
@@ -278,7 +278,7 @@ deliver_retained({MP, _} = SubscriberId, Topic, QoS) ->
                              qos=QoS,
                              dup=false,
                              mountpoint=MP,
-                             msg_ref=vmq_session:msg_ref()},
+                             msg_ref=vmq_mqtt_fsm:msg_ref()},
               vmq_queue:enqueue(QPid, {deliver, QoS, Msg})
       end, ok, MP, Topic).
 
@@ -311,11 +311,12 @@ direct_plugin_exports(Mod) when is_atom(Mod) ->
                    and is_atom(DefaultRegView) ->
             MountPoint = "",
             ClientId = fun(T) ->
-                               base64:encode_to_string(
-                                 integer_to_binary(
-                                   erlang:phash2(T)
-                                  )
-                                )
+                               list_to_binary(
+                                 base64:encode_to_string(
+                                   integer_to_binary(
+                                     erlang:phash2(T)
+                                    )
+                                  ))
                        end,
             CallingPid = self(),
             SubscriberId = {MountPoint, ClientId(CallingPid)},
@@ -339,12 +340,12 @@ direct_plugin_exports(Mod) when is_atom(Mod) ->
             end,
 
             PublishFun =
-            fun(Topic, Payload) ->
+            fun([W|_] = Topic, Payload) when is_binary(W) and is_binary(Payload) ->
                     wait_til_ready(),
-                    Msg = #vmq_msg{routing_key=vmq_topic:words(Topic),
+                    Msg = #vmq_msg{routing_key=Topic,
                                    mountpoint=MountPoint,
                                    payload=Payload,
-                                   msg_ref=vmq_session:msg_ref(),
+                                   msg_ref=vmq_mqtt_fsm:msg_ref(),
                                    dup=false,
                                    retain=false,
                                    trade_consistency=TradeConsistency,
@@ -354,7 +355,7 @@ direct_plugin_exports(Mod) when is_atom(Mod) ->
             end,
 
             SubscribeFun =
-            fun(Topic) when is_list(Topic) ->
+            fun([W|_] = Topic) when is_binary(W) ->
                     wait_til_ready(),
                     CallingPid = self(),
                     User = {plugin, Mod, CallingPid},
@@ -365,7 +366,7 @@ direct_plugin_exports(Mod) when is_atom(Mod) ->
             end,
 
             UnsubscribeFun =
-            fun(Topic) when is_list(Topic) ->
+            fun([W|_] = Topic) when is_binary(W) ->
                     wait_til_ready(),
                     CallingPid = self(),
                     User = {plugin, Mod, CallingPid},
@@ -391,7 +392,7 @@ plugin_queue_loop(PluginPid, PluginMod) ->
                                                 payload=Payload,
                                                 retain=IsRetain,
                                                 dup=IsDup}}) ->
-                                  PluginPid ! {deliver, lists:flatten(vmq_topic:unword(RoutingKey)),
+                                  PluginPid ! {deliver, RoutingKey,
                                                Payload,
                                                QoS,
                                                IsRetain,
